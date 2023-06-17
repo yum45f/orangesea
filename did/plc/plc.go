@@ -10,7 +10,7 @@ import (
 
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
-	"go.yumnet.cloud/orangesea/did/key"
+	didkey "go.yumnet.cloud/orangesea/did/key"
 )
 
 type OperationObject struct {
@@ -23,31 +23,37 @@ type OperationObject struct {
 	Sig                 *string            `json:"sig"`
 }
 
+type Operation struct {
+	CID       string          `json:"cid"`
+	Operation OperationObject `json:"operation"`
+	Nullified bool            `json:"nullified"`
+	CreatedAt string          `json:"createdAt"`
+}
+
 type Service struct {
 	Type     string `json:"type"`
 	Endpoint string `json:"endpoint"`
 }
 
-type DIDPlc struct {
-	RotationKeys        []*key.DIDKey
-	VerificationMethods map[string]*key.DIDKey
-	AlsoKnownAs         []string
-	Services            map[string]Service
-	Operations          []*OperationObject
+type DIDPlcData struct {
+	DID                 string             `json:"did"`
+	VerificationMethods map[string]string  `json:"verificationMethods"`
+	RotationKeys        []string           `json:"rotationKeys"`
+	AlsoKnownAs         []string           `json:"alsoKnownAs"`
+	Services            map[string]Service `json:"services"`
 }
 
-func NewDIDPlc(
-	rotationKeys []*key.DIDKey,
-	verificationMethods map[string]*key.DIDKey,
-	asKnownAs []string,
-	services map[string]Service,
-) DIDPlc {
-	return DIDPlc{
-		RotationKeys:        rotationKeys,
-		VerificationMethods: verificationMethods,
-		AlsoKnownAs:         asKnownAs,
-		Services:            services,
-	}
+type DIDPlc struct {
+	DID                 string
+	RotationKeys        []*didkey.DIDKey
+	VerificationMethods map[string]*didkey.DIDKey
+	AlsoKnownAs         []string
+	Services            map[string]Service
+	Operations          []Operation
+	OpCount             uint
+}
+
+func NewDIDPlc(did string) {
 }
 
 func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
@@ -78,7 +84,83 @@ func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
 	return &unsigned, nil
 }
 
+func (d *DIDPlc) FetchData() error {
+	if d.DID == "" {
+		return fmt.Errorf("failed to fetch data from plc.directory; DID is empty")
+	}
+
+	resp, err := http.Get(fmt.Sprintf("https://plc.directory/%s/data", d.DID))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"failed to fetch data from plc.directory; status code: %d", resp.StatusCode,
+		)
+	}
+
+	var data DIDPlcData
+	err = json.NewDecoder(resp.Body).Decode(&data)
+	if err != nil {
+		return err
+	}
+
+	for _, key := range data.RotationKeys {
+		kstruct, err := didkey.NewDIDKeyFromDID(key)
+		if err != nil {
+			return err
+		}
+		d.RotationKeys = append(d.RotationKeys, kstruct)
+	}
+
+	for name, key := range data.VerificationMethods {
+		kstruct, err := didkey.NewDIDKeyFromDID(key)
+		if err != nil {
+			return err
+		}
+		d.VerificationMethods[name] = kstruct
+	}
+
+	d.AlsoKnownAs = data.AlsoKnownAs
+	d.Services = data.Services
+
+	return nil
+}
+
+func (d *DIDPlc) FetchAuditLog() error {
+	if d.DID == "" {
+		return fmt.Errorf("failed to fetch data from plc.directory; DID is empty")
+	}
+
+	resp, err := http.Get(fmt.Sprintf("https://plc.directory/%s/log/audit", d.DID))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"failed to fetch data from plc.directory; status code: %d", resp.StatusCode,
+		)
+	}
+
+	var operations []Operation
+
+	err = json.NewDecoder(resp.Body).Decode(&operations)
+	if err != nil {
+		return err
+	}
+
+	d.Operations = operations
+	return nil
+}
+
 func (d *DIDPlc) Create(keyID int) error {
+	if err := d.FetchAuditLog(); err != nil {
+		return err
+	}
 	if len(d.Operations) != 0 {
 		return fmt.Errorf("operations must be empty")
 	}
@@ -86,6 +168,7 @@ func (d *DIDPlc) Create(keyID int) error {
 	if keyID >= len(d.RotationKeys) {
 		return fmt.Errorf("invalid keyID; keyID is out of range")
 	}
+
 	key := d.RotationKeys[keyID]
 	if key == nil {
 		return fmt.Errorf("invalid keyID; key is nil")
@@ -134,7 +217,7 @@ func (d *DIDPlc) Create(keyID int) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("failed to create DID")
+		return fmt.Errorf("failed to create DID; status code: %d", resp.StatusCode)
 	}
 
 	return nil
