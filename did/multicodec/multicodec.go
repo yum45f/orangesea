@@ -1,24 +1,30 @@
 package multicodec
 
 import (
+	"encoding/binary"
 	"fmt"
 )
 
 const (
-	Secp256k1 uint64 = 0xe7
+	MaxLenUvarint63   = 9
+	MaxValueUvarint63 = (1 << 63) - 1
+)
+
+const (
+	P256Pub = 0x1200
 )
 
 func ParseMulticodec(multicodec []byte) (uint64, []byte, error) {
-	if len(multicodec) < 2 {
-		return 0, nil, fmt.Errorf("multicodec must be at least 2 bytes")
+	code, n := binary.Uvarint(multicodec)
+	if n <= 0 {
+		return 0, nil, fmt.Errorf("invalid multicodec; varint overflow")
 	}
 
-	code := uint64(multicodec[0])<<8 + uint64(multicodec[1])
-	bytes := multicodec[2:]
-
-	return code, bytes, nil
+	return code, multicodec[n:], nil
 }
 
 func EncodeMulticodec(code uint64, bytes []byte) []byte {
-	return append([]byte{byte(code >> 8), byte(code)}, bytes...)
+	buf := make([]byte, binary.MaxVarintLen64)
+	n := binary.PutUvarint(buf, code)
+	return append(buf[:n], bytes...)
 }
