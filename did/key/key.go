@@ -1,6 +1,7 @@
 package key
 
 import (
+	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"fmt"
@@ -8,41 +9,12 @@ import (
 	"strings"
 
 	"github.com/btcsuite/btcd/btcutil/base58"
-	"github.com/ethereum/go-ethereum/crypto/secp256k1"
 	"go.yumnet.cloud/orangesea/did/multicodec"
 )
 
-type Secp256k1PubKey struct {
-	X []byte
-	Y []byte
-}
-
-func (p Secp256k1PubKey) Compress() []byte {
-	return secp256k1.CompressPubkey(
-		new(big.Int).SetBytes(p.X),
-		new(big.Int).SetBytes(p.Y),
-	)
-}
-
 type DIDKey struct {
-	PublicKey  Secp256k1PubKey
-	PrivateKey []byte
-}
-
-func NewDIDKey() (*DIDKey, error) {
-	params := secp256k1.S256().Params()
-	priv, x, y, err := elliptic.GenerateKey(params, rand.Reader)
-	if err != nil {
-		return nil, err
-	}
-
-	return &DIDKey{
-		PublicKey: Secp256k1PubKey{
-			X: x.Bytes(),
-			Y: y.Bytes(),
-		},
-		PrivateKey: priv,
-	}, nil
+	PublicKey  ecdsa.PublicKey
+	PrivateKey *ecdsa.PrivateKey
 }
 
 func NewDIDKeyFromDID(did string) (*DIDKey, error) {
@@ -74,7 +46,7 @@ func NewDIDKeyFromDID(did string) (*DIDKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	if code != multicodec.Secp256k1 {
+	if code != multicodec.P256Pub {
 		return nil, fmt.Errorf("multicodec not supported; code: %d", code)
 	}
 	if bytes == nil {
@@ -84,12 +56,12 @@ func NewDIDKeyFromDID(did string) (*DIDKey, error) {
 		return nil, fmt.Errorf("invalid did key; decoded bytes must be 33 bytes")
 	}
 
-	x, y := secp256k1.DecompressPubkey(bytes)
-
+	x, y := elliptic.UnmarshalCompressed(elliptic.P256(), bytes)
 	return &DIDKey{
-		PublicKey: Secp256k1PubKey{
-			X: x.Bytes(),
-			Y: y.Bytes(),
+		PublicKey: ecdsa.PublicKey{
+			Curve: elliptic.P256(),
+			X:     x,
+			Y:     y,
 		},
 		PrivateKey: nil,
 	}, nil
@@ -100,40 +72,56 @@ func NewDIDKeyFromPrivateKey(privateKey []byte) (*DIDKey, error) {
 		return nil, fmt.Errorf("invalid private key; must be 32 bytes")
 	}
 
-	x, y := secp256k1.S256().ScalarBaseMult(privateKey)
+	x, y := elliptic.P256().ScalarBaseMult(privateKey)
+
+	pubKey := ecdsa.PublicKey{
+		Curve: elliptic.P256(),
+		X:     x,
+		Y:     y,
+	}
 
 	return &DIDKey{
-		PublicKey: Secp256k1PubKey{
-			X: x.Bytes(),
-			Y: y.Bytes(),
+		PublicKey: pubKey,
+		PrivateKey: &ecdsa.PrivateKey{
+			PublicKey: pubKey,
+			D:         new(big.Int).SetBytes(privateKey),
 		},
-		PrivateKey: privateKey,
 	}, nil
 }
 
-func (k DIDKey) DID() string {
+func (did DIDKey) DID() string {
 	encoded := base58.Encode(
 		multicodec.EncodeMulticodec(
-			multicodec.Secp256k1,
-			k.PublicKey.Compress(),
+			multicodec.P256Pub,
+			elliptic.MarshalCompressed(elliptic.P256(), did.PublicKey.X, did.PublicKey.Y),
 		),
 	)
 
 	return fmt.Sprintf("did:key:z%s", encoded)
 }
 
-func (k DIDKey) Verify(message []byte, signature []byte) bool {
-	return secp256k1.VerifySignature(
-		k.PublicKey.Compress(),
-		message,
+func (did DIDKey) Verify(hash []byte, signature []byte) bool {
+	return ecdsa.VerifyASN1(
+		&did.PublicKey,
+		hash,
 		signature,
 	)
 }
 
-func (k DIDKey) Sign(message []byte) ([]byte, error) {
-	if k.PrivateKey == nil {
+func (did DIDKey) Sign(digest []byte) ([]byte, error) {
+	if did.PrivateKey == nil {
 		return nil, fmt.Errorf("failed to sign; private key not found")
 	}
+	if did.PrivateKey.Curve != elliptic.P256() {
+		return nil, fmt.Errorf("failed to sign; curve must be P256")
+	}
+	if len(digest) != 32 {
+		return nil, fmt.Errorf("failed to sign; digest must be 32 bytes")
+	}
 
-	return secp256k1.Sign(message, k.PrivateKey)
+	return ecdsa.SignASN1(
+		rand.Reader,
+		did.PrivateKey,
+		digest,
+	)
 }

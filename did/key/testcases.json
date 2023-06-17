@@ -1,0 +1,102 @@
+[
+  {
+    "publicKey": "02cff471c50c15082324b9dacf8b6b805613e0c50d2c128f97eeeb1665ede9db61",
+    "privateKey": "ae26f76ddbb3d956396e1acad09a5cffebf79368d957f516875df27b6d6bb162",
+    "did": "did:key:zDnaeeRjdM9mvYRtHkeSfDdjTjWymc3ACEtyVsauirgeMgW7z"
+  },
+  {
+    "publicKey": "02294aa1c99aefbbf50eb0fb4d5d3e34c87c4f661e55d7d7d94ab1fd214bf9b152",
+    "privateKey": "a8da7ee687897621881b067eff8df2d832260d4ba6cab394290e2e71287c16dd",
+    "did": "did:key:zDnaeTD9mRQqbrWtcyXpX7ZtEz9nrMzvpXmqrJx41df62JnCh"
+  },
+  {
+    "publicKey": "03b6ae9c49a53caea83d51d6fb11f956735121bd1af48e6ff60867821b283fb410",
+    "privateKey": "2b13b3b8a4642549d3f2a146397ec325003a5a748f2fcd564669bc6452424d06",
+    "did": "did:key:zDnaeuxQ3WytkJX7WywPNhyH8mDKArPBtRWJbwcMrY9AoLNYX"
+  },
+  {
+    "publicKey": "027af3ce5ea29cdb033bd884ac2ea297488478cf88ac0d13ec39cd3a2daa636ef1",
+    "privateKey": "77b4c22d7144fe76c328e0b0c4c3e28099c5d02d5e73d16e2fe0d2301fde7265",
+    "did": "did:key:zDnaeYhvQf5WHXAJvY3vzyKkcxXqsaZXWSQ3Q2ePaG8QFPXpc"
+  },
+  {
+    "publicKey": "037e947aea5ee2e9e1a0cc467c951ff084ee789fe908415e9e6f5b8cd94c8b7c71",
+    "privateKey": "728416ebb87a2502efbf4e148af87aecba4c73bd20973010c9f04a10452326ad",
+    "did": "did:key:zDnaerBQ6woVurRW4HJiAPxzHzMme9XfFh7YHYiEQGgmcmPRS"
+  },
+  {
+    "publicKey": "028fe1e001dfab687fec0b438e0f3379d8155eadc01e4d2ec636ea20ef4aa933e0",
+    "privateKey": "e46652f994c9b79303623ba95ef52b61d10fb93f1e09a9acc6b0861ab1b0d354",
+    "did": "did:key:zDnaea7d7SxjTZ4HUhWRxqamMsD1StvErfrdxHpFCqjfgzBgB"
+  },
+  {
+    "publicKey": "02b7ebbc041749f4f6cbf7b4d4b3a71e19719435e2305bb6c66005bc51ddd8dc8e",
+    "privateKey": "525505442670b12832214cae248dd82fd2a84a8386fc587d1026af9648da840b",
+    "did": "did:key:zDnaecov93t3DRrK7fGP8n6ziQcJZUUgeVkFpMtQ8VYRNpchj"
+  },
+  {
+    "publicKey": "03c7386e9fea1644b6f58ffbdfb7bb76999dbf9f835e8a4d97dc8d51023777ef4f",
+    "privateKey": "ba7e776f2f30673cea9f99d0e40a779908e3084b09b3dc87c5b77669ca42fd81",
+    "did": "did:key:zDnaew4xTVMuhvkvAA5jZGMDh6YCFC46aMoFdrYN1u5o3G1h8"
+  },
+  {
+    "publicKey": "03837bed61bc443d3ead1c9b7684ef0d3e8483b3249ff51d8d5aed5d30be4885ab",
+    "privateKey": "f0670fea886a89e3abe2a67d0dab0dce0fa5fc978dd9e9b2c938b8247afad3cb",
+    "did": "did:key:zDnaerWYRj6d7f432DAaRnpfchHR3etwdejcx4MfwfPpmNiux"
+  },
+  {
+    "publicKey": "02e95e73159dd3c3530ac44b3d1061fa6ea263491814fcc7d5e7e299e948091747",
+    "privateKey": "f8eaa3922c69f3fe3d24b9dab7fa56f7dbea4166d93b9012c6f1451f621655fa",
+    "did": "did:key:zDnaeg8wa6WYz2zmWg2TdUUfbGdrxhgUSxKcDSz3ApCA21yx2"
+  },
+  {
+    "publicKey": "03bc5838008792b4fdb966545cafa683d9a46db1f096303a3122980367fcdddbe1",
+    "privateKey": "7456ad152644e31a55fa84b9a400e15ce4ab05de52c236a42cc44cc6b2b0c3f0",
+    "did": "did:key:zDnaevLW5tYeCoMMSfKhLWvcs8m1bHRiko42mL6mHnF6F6Mrp"
+  },
+  {
+    "publicKey": "030c90b58d50344e95fe5f78e617402e44623e107543f1034533153b1646e3b891",
+    "privateKey": "2ce965e9067054dd47a353c93820ed0b8a23d48fd589d16b68d6cda140d47fb4",
+    "did": "did:key:zDnaeiWLHpEpyAGsMKp4FBMY7i2XWS2vkRRT7J8TZiquYpjZa"
+  },
+  {
+    "publicKey": "034dfbec08be63547be31405e01f9bbc2ec9bba7598513e56c21297123d38da134",
+    "privateKey": "d90b2daebf7fd3fd2eee4f03674276fad31aed6d16256e86e2d90e60c3446797",
+    "did": "did:key:zDnaenuhcNSS13WGWWUiKexk7Uv8kLWNcqJ34t1ZbnTDsgh9D"
+  },
+  {
+    "publicKey": "037ae8feeb117042801f6e0867bdbd74964a8ca57855d476c5a8548dbc91a81c1e",
+    "privateKey": "8e1e3cd89092e9db1e2b630c71aadfde6a6df8fa73eaf243be33d619b5292cd6",
+    "did": "did:key:zDnaeqw5DdZC9hp4TddTgf8TXQpAkEFrWWVVM4zDj21KS5qeD"
+  },
+  {
+    "publicKey": "0315ff32bac6eb26fec7b6b7efcc40567eccefb6c844581ce2128128595e8f39f7",
+    "privateKey": "1d21df0eed7894fef81b065398915b065ccbeca69551745ab67f06a780cb31af",
+    "did": "did:key:zDnaej99gDiXigeacRCRzqg4PWrRAsJJEfhDjWYtMoCmeuqoU"
+  },
+  {
+    "publicKey": "03b774cb4d9dcd34b562b0adaa1eb70f87624da99c7ece3896255f97e96d965c01",
+    "privateKey": "198e922866295096e6f09c331a78c9f6fda5bf5566dd5a21221a762badb35b64",
+    "did": "did:key:zDnaev1RKSqDqme9f8HXVGfYeEDdfg7LbKBCCLRzVGLjZZDfv"
+  },
+  {
+    "publicKey": "0250b4dc5e23eb5339cb400388cd4a6f1ae7d06e7a1c7125a14b310a2469aaaad4",
+    "privateKey": "fee367c4a878841f4d87296ab60cff01d8daaebb4242f94872f4a62cdec5f8f0",
+    "did": "did:key:zDnaeVs1chDrcRg6w2aLKyfLe9dr2NZqbgmKhDJqFmUgMKTP1"
+  },
+  {
+    "publicKey": "02ff3c974499d4d34830cf33e12450e544c2c7861299b7019818289020ff618b3c",
+    "privateKey": "5ecc44be1c9bc10c6964cbaf0e9d779cb28e274a3dbaba31c9dbb7bacdce99ed",
+    "did": "did:key:zDnaehcJbXCmzjoXtrig6kFPyPzWzYiEhgFTKnqv7ZaLQUjsy"
+  },
+  {
+    "publicKey": "02ec4fcb4a6a667c644cc99cb4a336699570818567d7e2c2acc0a0cd529c7a06bb",
+    "privateKey": "16e366a9be996e4ca18995568e64d38b8f3282b5da5d3c2928c9470e37bf0a45",
+    "did": "did:key:zDnaegLRqH1wzZJRYt2j7G4VF12UZdq9gGzvv8JrGsKiU15dt"
+  },
+  {
+    "publicKey": "0316c93d6a5209d59133e25ef3ba2d952ca8d81fa587731e2588d6eb6cdd0318c4",
+    "privateKey": "9d5f2f426393b45c88419fdd833afac565aaa877c61dac5da3a93d13026e64f0",
+    "did": "did:key:zDnaejCEN3ukcJiNRMDtEa6pCPEd7G9ZbfoSFytqMXtUkVBS3"
+  }
+]
