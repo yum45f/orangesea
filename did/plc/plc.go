@@ -3,14 +3,22 @@ package plc
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
+	"github.com/ipld/go-ipld-prime/node/bindnode"
+	"github.com/ipld/go-ipld-prime/schema"
 	didkey "go.yumnet.cloud/orangesea/did/key"
+)
+
+const (
+	PLC_DIRECTORY_BASEURL = "http://localhost:2582"
 )
 
 type OperationObject struct {
@@ -21,6 +29,69 @@ type OperationObject struct {
 	Services            map[string]Service `json:"services"`
 	Prev                *string            `json:"prev"`
 	Sig                 *string            `json:"sig"`
+}
+
+func (o *OperationObject) IPLDNode() *OperationIPLDNode {
+
+	vmKeys := make([]string, 0, len(o.VerificationMethods))
+	for k := range o.VerificationMethods {
+		vmKeys = append(vmKeys, k)
+	}
+
+	svcKeys := make([]string, 0, len(o.Services))
+	for k := range o.Services {
+		svcKeys = append(svcKeys, k)
+	}
+
+	return &OperationIPLDNode{
+		Type:         o.Type,
+		RotationKeys: o.RotationKeys,
+		VerificationMethods: struct {
+			Keys   []string
+			Values map[string]string
+		}{
+			Keys:   vmKeys,
+			Values: o.VerificationMethods,
+		},
+		AlsoKnownAs: o.AlsoKnownAs,
+		Services: struct {
+			Keys   []string
+			Values map[string]Service
+		}{
+			Keys:   svcKeys,
+			Values: o.Services,
+		},
+		Prev: o.Prev,
+		Sig:  o.Sig,
+	}
+}
+
+type OperationIPLDNode struct {
+	Type                string   `json:"type"`
+	RotationKeys        []string `json:"rotationKeys"`
+	VerificationMethods struct {
+		Keys   []string
+		Values map[string]string
+	} `json:"verificationMethods"`
+	AlsoKnownAs []string `json:"alsoKnownAs"`
+	Services    struct {
+		Keys   []string
+		Values map[string]Service
+	} `json:"services"`
+	Prev *string `json:"prev"`
+	Sig  *string `json:"sig"`
+}
+
+func (n *OperationIPLDNode) OperationObject() *OperationObject {
+	return &OperationObject{
+		Type:                n.Type,
+		RotationKeys:        n.RotationKeys,
+		VerificationMethods: n.VerificationMethods.Values,
+		AlsoKnownAs:         n.AlsoKnownAs,
+		Services:            n.Services.Values,
+		Prev:                n.Prev,
+		Sig:                 n.Sig,
+	}
 }
 
 type Operation struct {
@@ -53,7 +124,32 @@ type DIDPlc struct {
 	OpCount             uint
 }
 
-func NewDIDPlc(did string) {
+var (
+	OperationSchema schema.Type
+)
+
+func init() {
+	schema, err := ipld.LoadSchemaBytes([]byte(`
+		type Operation struct {
+			type String
+			rotationKeys [String]
+			verificationMethods { String: String }
+			alsoKnownAs [String]
+			services { String: Service }
+			prev nullable String
+			sig optional String
+		} representation map
+
+		type Service struct {
+			type String
+			endpoint String
+		} representation map
+	`))
+	if err != nil {
+		panic(err)
+	}
+
+	OperationSchema = schema.TypeByName("Operation")
 }
 
 func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
@@ -89,7 +185,7 @@ func (d *DIDPlc) FetchData() error {
 		return fmt.Errorf("failed to fetch data from plc.directory; DID is empty")
 	}
 
-	resp, err := http.Get(fmt.Sprintf("https://plc.directory/%s/data", d.DID))
+	resp, err := http.Get(fmt.Sprintf("%s/%s/data", PLC_DIRECTORY_BASEURL, d.DID))
 	if err != nil {
 		return err
 	}
@@ -134,7 +230,7 @@ func (d *DIDPlc) FetchAuditLog() error {
 		return fmt.Errorf("failed to fetch data from plc.directory; DID is empty")
 	}
 
-	resp, err := http.Get(fmt.Sprintf("https://plc.directory/%s/log/audit", d.DID))
+	resp, err := http.Get(fmt.Sprintf("%s/%s/log/audit", PLC_DIRECTORY_BASEURL, d.DID))
 	if err != nil {
 		return err
 	}
@@ -157,57 +253,85 @@ func (d *DIDPlc) FetchAuditLog() error {
 	return nil
 }
 
-func (d *DIDPlc) Create(keyID int) error {
-	if err := d.FetchAuditLog(); err != nil {
-		return err
-	}
-	if len(d.Operations) != 0 {
-		return fmt.Errorf("operations must be empty")
+func (d *DIDPlc) calcDIDWithKeyIndex(index int) (string, *OperationObject, error) {
+	if index >= len(d.RotationKeys) {
+		return "", nil, fmt.Errorf("invalid keyID; keyID is out of range")
 	}
 
-	if keyID >= len(d.RotationKeys) {
-		return fmt.Errorf("invalid keyID; keyID is out of range")
-	}
-
-	key := d.RotationKeys[keyID]
+	key := d.RotationKeys[index]
 	if key == nil {
-		return fmt.Errorf("invalid keyID; key is nil")
+		return "", nil, fmt.Errorf("invalid keyID; key is nil")
 	}
 
-	unsigned, err := d.unsignedOperation()
+	op, err := d.unsignedOperation()
+	if err != nil {
+		return "", nil, err
+	}
+
+	buf := new(bytes.Buffer)
+	node := bindnode.Wrap(op.IPLDNode(), OperationSchema).Representation()
+	if err := dagcbor.Encode(
+		node, buf,
+	); err != nil {
+		return "", nil, err
+	}
+
+	sig, err := key.Sign(sha256.Sum256(buf.Bytes()))
+	if err != nil {
+		return "", nil, err
+	}
+
+	b64sig := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(sig)
+	op.Sig = &b64sig
+
+	buf.Reset()
+
+	node = bindnode.Wrap(op.IPLDNode(), OperationSchema).Representation()
+	if err := dagcbor.Encode(node, buf); err != nil {
+		return "", nil, err
+	}
+
+	hash := sha256.Sum256(buf.Bytes())
+	b32encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(hash[:])
+	did := strings.ToLower(fmt.Sprintf("did:plc:%s", b32encoded[:24]))
+
+	return did, op, nil
+}
+
+func (d *DIDPlc) CalcDID() (string, *OperationObject, error) {
+	for i := 0; i < len(d.RotationKeys); i++ {
+		did, signed, err := d.calcDIDWithKeyIndex(i)
+		if err != nil {
+			fmt.Printf("failed to calculate DID; %v\n", err)
+			continue
+		}
+
+		return did, signed, nil
+	}
+	return "", nil, fmt.Errorf("failed to calculate DID with all keys")
+}
+
+func (d *DIDPlc) Create() error {
+	did, signedOp, err := d.CalcDID()
 	if err != nil {
 		return err
 	}
-
-	encoded, err := ipld.Marshal(dagcbor.Encode, unsigned, nil)
-	if err != nil {
-		return err
-	}
-
-	sig, err := key.Sign(encoded)
-	if err != nil {
-		return err
-	}
-
-	s := base64.URLEncoding.EncodeToString(sig)
-	unsigned.Sig = &s
-	signed, err := ipld.Marshal(dagcbor.Encode, unsigned, nil)
-	if err != nil {
-		return err
-	}
-
-	hashed := sha256.Sum256(signed)
 
 	// did:plc is the first 24 hex characters of the hashed value
-	did := fmt.Sprintf("did:plc:%x", hashed[:12])
+	d.DID = did
+	if err := d.FetchAuditLog(); err != nil {
+		fmt.Printf("failed to fetch audit log, but this is expected; %v\n", err)
+	} else {
+		return fmt.Errorf("failed to create did:plc; DID already exists")
+	}
 
-	body, err := json.Marshal(signed)
+	body, err := json.Marshal(signedOp)
 	if err != nil {
 		return err
 	}
 
 	resp, err := http.Post(
-		fmt.Sprintf("https://plc.directory/%s", did),
+		fmt.Sprintf("%s/%s", PLC_DIRECTORY_BASEURL, d.DID),
 		"application/json",
 		bytes.NewBuffer(body),
 	)
@@ -216,8 +340,15 @@ func (d *DIDPlc) Create(keyID int) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("failed to create DID; status code: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf(
+			"failed to create DID; status code: %d",
+			resp.StatusCode,
+		)
+	}
+
+	if err := d.FetchAuditLog(); err != nil {
+		return err
 	}
 
 	return nil

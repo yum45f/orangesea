@@ -3,7 +3,7 @@ package key_test
 import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"math/big"
 	"os"
@@ -14,14 +14,16 @@ import (
 )
 
 type TestCaseJSON struct {
-	PublicKey  string `json:"publicKey"`
+	DID       string `json:"did"`
+	PublicKey struct {
+		X string `json:"x"`
+		Y string `json:"y"`
+	} `json:"publicKey"`
 	PrivateKey string `json:"privateKey"`
-	DID        string `json:"did"`
 }
 
 type TestCase struct {
 	DID         string
-	PublicKeyB  []byte
 	PrivateKeyB []byte
 	PrivateKey  *ecdsa.PrivateKey
 	PublicKey   *ecdsa.PublicKey
@@ -30,6 +32,7 @@ type TestCase struct {
 var testCases []TestCase
 
 func init() {
+	testing.Init()
 	var raw []TestCaseJSON
 	f, err := os.Open("./testcases.json")
 	if err != nil {
@@ -46,27 +49,37 @@ func init() {
 	json.Unmarshal(data, &raw)
 
 	for _, tc := range raw {
-		pubb, err := hex.DecodeString(tc.PublicKey)
+		x, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(tc.PublicKey.X)
+		if err != nil {
+			panic(err)
+		}
+		y, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(tc.PublicKey.Y)
 		if err != nil {
 			panic(err)
 		}
 
-		x, y := elliptic.UnmarshalCompressed(elliptic.P256(), pubb)
-		pub := ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
-
-		privb, err := hex.DecodeString(tc.PrivateKey)
+		d, err := base64.URLEncoding.WithPadding(base64.NoPadding).DecodeString(tc.PrivateKey)
 		if err != nil {
 			panic(err)
+		}
+
+		pub := ecdsa.PublicKey{
+			Curve: elliptic.P256(),
+			X:     new(big.Int).SetBytes(x),
+			Y:     new(big.Int).SetBytes(y),
 		}
 
 		testCases = append(testCases, TestCase{
 			DID:         tc.DID,
-			PublicKeyB:  pubb,
-			PrivateKeyB: privb,
+			PrivateKeyB: d,
 			PrivateKey: &ecdsa.PrivateKey{
-				PublicKey: pub, D: new(big.Int).SetBytes(privb),
+				PublicKey: pub, D: new(big.Int).SetBytes(d),
 			},
-			PublicKey: &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y},
+			PublicKey: &ecdsa.PublicKey{
+				Curve: elliptic.P256(),
+				X:     new(big.Int).SetBytes(x),
+				Y:     new(big.Int).SetBytes(y),
+			},
 		})
 	}
 }

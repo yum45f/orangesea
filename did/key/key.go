@@ -68,10 +68,6 @@ func NewDIDKeyFromDID(did string) (*DIDKey, error) {
 }
 
 func NewDIDKeyFromPrivateKey(privateKey []byte) (*DIDKey, error) {
-	if len(privateKey) != 32 {
-		return nil, fmt.Errorf("invalid private key; must be 32 bytes")
-	}
-
 	x, y := elliptic.P256().ScalarBaseMult(privateKey)
 
 	pubKey := ecdsa.PublicKey{
@@ -100,28 +96,50 @@ func (did DIDKey) DID() string {
 	return fmt.Sprintf("did:key:z%s", encoded)
 }
 
-func (did DIDKey) Verify(hash []byte, signature []byte) bool {
-	return ecdsa.VerifyASN1(
-		&did.PublicKey,
-		hash,
-		signature,
-	)
+func (did DIDKey) Verify(digest [32]byte, signature []byte) bool {
+	if did.PublicKey.Curve != elliptic.P256() {
+		return false
+	}
+
+	curveByteSize := did.PublicKey.Curve.Params().BitSize / 8
+	if did.PublicKey.Curve.Params().BitSize/8%8 > 0 {
+		curveByteSize += 1
+	}
+
+	if len(signature) != curveByteSize*2 {
+		return false
+	}
+
+	r := new(big.Int).SetBytes(signature[:curveByteSize])
+	s := new(big.Int).SetBytes(signature[curveByteSize:])
+
+	return ecdsa.Verify(&did.PublicKey, digest[:], r, s)
 }
 
-func (did DIDKey) Sign(digest []byte) ([]byte, error) {
+func (did DIDKey) Sign(digest [32]byte) ([]byte, error) {
 	if did.PrivateKey == nil {
 		return nil, fmt.Errorf("failed to sign; private key not found")
 	}
 	if did.PrivateKey.Curve != elliptic.P256() {
 		return nil, fmt.Errorf("failed to sign; curve must be P256")
 	}
-	if len(digest) != 32 {
-		return nil, fmt.Errorf("failed to sign; digest must be 32 bytes")
+
+	key := did.PrivateKey
+
+	r, s, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	if err != nil {
+		return nil, err
 	}
 
-	return ecdsa.SignASN1(
-		rand.Reader,
-		did.PrivateKey,
-		digest,
-	)
+	curveByteSize := key.Curve.Params().BitSize / 8
+	if key.Curve.Params().BitSize/8%8 > 0 {
+		curveByteSize += 1
+	}
+
+	sig := make([]byte, curveByteSize*2)
+
+	r.FillBytes(sig[0:curveByteSize])
+	s.FillBytes(sig[curveByteSize:])
+
+	return sig, nil
 }
