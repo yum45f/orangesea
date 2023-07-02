@@ -8,17 +8,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
+	"github.com/ipld/go-ipld-prime/codec/dagjson"
 	"github.com/ipld/go-ipld-prime/node/bindnode"
 	"github.com/ipld/go-ipld-prime/schema"
 	didkey "go.yumnet.cloud/orangesea/did/key"
 )
 
 const (
-	PLC_DIRECTORY_BASEURL = "http://localhost:2582"
+	PLC_DIRECTORY_BASEURL          = "http://localhost:2582"
+	MAX_CREATE_RETRIES             = 5
+	MAX_UPDATE_RETRIES_PER_KEY     = 5
+	MAX_DEACTIVATE_RETRIES_PER_KEY = 5
 )
 
 type OperationObject struct {
@@ -32,38 +38,43 @@ type OperationObject struct {
 }
 
 func (o *OperationObject) IPLDNode() *OperationIPLDNode {
+	node := &OperationIPLDNode{
+		Type:         o.Type,
+		RotationKeys: o.RotationKeys,
+		AlsoKnownAs:  o.AlsoKnownAs,
+		Prev:         o.Prev,
+		Sig:          o.Sig,
+	}
 
 	vmKeys := make([]string, 0, len(o.VerificationMethods))
 	for k := range o.VerificationMethods {
 		vmKeys = append(vmKeys, k)
+	}
+	sort.Strings(vmKeys)
+
+	node.VerificationMethods = struct {
+		Keys   []string
+		Values map[string]string
+	}{
+		Keys:   vmKeys,
+		Values: o.VerificationMethods,
 	}
 
 	svcKeys := make([]string, 0, len(o.Services))
 	for k := range o.Services {
 		svcKeys = append(svcKeys, k)
 	}
+	sort.Strings(svcKeys)
 
-	return &OperationIPLDNode{
-		Type:         o.Type,
-		RotationKeys: o.RotationKeys,
-		VerificationMethods: struct {
-			Keys   []string
-			Values map[string]string
-		}{
-			Keys:   vmKeys,
-			Values: o.VerificationMethods,
-		},
-		AlsoKnownAs: o.AlsoKnownAs,
-		Services: struct {
-			Keys   []string
-			Values map[string]Service
-		}{
-			Keys:   svcKeys,
-			Values: o.Services,
-		},
-		Prev: o.Prev,
-		Sig:  o.Sig,
+	node.Services = struct {
+		Keys   []string
+		Values map[string]Service
+	}{
+		Keys:   svcKeys,
+		Values: o.Services,
 	}
+
+	return node
 }
 
 type OperationIPLDNode struct {
@@ -98,7 +109,7 @@ type Operation struct {
 	CID       string          `json:"cid"`
 	Operation OperationObject `json:"operation"`
 	Nullified bool            `json:"nullified"`
-	CreatedAt string          `json:"createdAt"`
+	CreatedAt time.Time       `json:"createdAt"`
 }
 
 type Service struct {
@@ -114,6 +125,7 @@ type DIDPlcData struct {
 	Services            map[string]Service `json:"services"`
 }
 
+// ToDo: add support for reverting with rotation operations
 type DIDPlc struct {
 	DID                 string
 	RotationKeys        []*didkey.DIDKey
@@ -126,6 +138,7 @@ type DIDPlc struct {
 
 var (
 	OperationSchema schema.Type
+	TombstoneSchema schema.Type
 )
 
 func init() {
@@ -140,6 +153,12 @@ func init() {
 			sig optional String
 		} representation map
 
+		type Tombstone struct {
+			type String
+			prev String
+			sig String
+		} representation map
+
 		type Service struct {
 			type String
 			endpoint String
@@ -150,6 +169,19 @@ func init() {
 	}
 
 	OperationSchema = schema.TypeByName("Operation")
+	TombstoneSchema = schema.TypeByName("Tombstone")
+}
+
+func NewDIDPlc(did string) *DIDPlc {
+	return &DIDPlc{
+		DID:                 did,
+		RotationKeys:        make([]*didkey.DIDKey, 0),
+		VerificationMethods: make(map[string]*didkey.DIDKey),
+		AlsoKnownAs:         make([]string, 0),
+		Services:            make(map[string]Service),
+		Operations:          make([]Operation, 0),
+		OpCount:             0,
+	}
 }
 
 func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
@@ -167,7 +199,23 @@ func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
 		verificationMethods[name] = key.DID()
 	}
 
-	unsigned := OperationObject{
+	d.sortOperationsByCreatedAt()
+	oplog := d.getLatestValidOperationLog()
+	if oplog != nil {
+		return &OperationObject{
+			Type:                "plc_operation",
+			RotationKeys:        roatationKeys,
+			VerificationMethods: verificationMethods,
+			AlsoKnownAs:         d.AlsoKnownAs,
+			Services:            d.Services,
+			Prev:                &oplog.CID,
+			Sig:                 nil,
+		}, nil
+	}
+
+	// if no operations are found,
+	// this return an unsigned operation without prev, which MUST be nil.
+	return &OperationObject{
 		Type:                "plc_operation",
 		RotationKeys:        roatationKeys,
 		VerificationMethods: verificationMethods,
@@ -175,9 +223,31 @@ func (d *DIDPlc) unsignedOperation() (*OperationObject, error) {
 		Services:            d.Services,
 		Prev:                nil,
 		Sig:                 nil,
+	}, nil
+}
+
+func (d *DIDPlc) unsignedTombstoneOperation() (*OperationObject, error) {
+	d.sortOperationsByCreatedAt()
+	oplog := d.getLatestValidOperationLog()
+	if oplog == nil {
+		return nil, fmt.Errorf("no operation found")
 	}
 
-	return &unsigned, nil
+	return &OperationObject{
+		Type:                "plc_tombstone",
+		RotationKeys:        nil,
+		VerificationMethods: nil,
+		AlsoKnownAs:         nil,
+		Services:            nil,
+		Prev:                &oplog.CID,
+		Sig:                 nil,
+	}, nil
+}
+
+func (d *DIDPlc) sortOperationsByCreatedAt() {
+	sort.Slice(d.Operations, func(i, j int) bool {
+		return d.Operations[i].CreatedAt.After(d.Operations[j].CreatedAt)
+	})
 }
 
 func (d *DIDPlc) FetchData() error {
@@ -250,10 +320,22 @@ func (d *DIDPlc) FetchAuditLog() error {
 	}
 
 	d.Operations = operations
+	d.sortOperationsByCreatedAt()
+
 	return nil
 }
 
-func (d *DIDPlc) calcDIDWithKeyIndex(index int) (string, *OperationObject, error) {
+func (d *DIDPlc) getLatestValidOperationLog() *Operation {
+	d.sortOperationsByCreatedAt()
+	for _, op := range d.Operations {
+		if !op.Nullified {
+			return &op
+		}
+	}
+	return nil
+}
+
+func (d *DIDPlc) calcDIDWithKeyIndex(index int, op *OperationObject) (string, *OperationObject, error) {
 	if index >= len(d.RotationKeys) {
 		return "", nil, fmt.Errorf("invalid keyID; keyID is out of range")
 	}
@@ -261,11 +343,6 @@ func (d *DIDPlc) calcDIDWithKeyIndex(index int) (string, *OperationObject, error
 	key := d.RotationKeys[index]
 	if key == nil {
 		return "", nil, fmt.Errorf("invalid keyID; key is nil")
-	}
-
-	op, err := d.unsignedOperation()
-	if err != nil {
-		return "", nil, err
 	}
 
 	buf := new(bytes.Buffer)
@@ -282,11 +359,19 @@ func (d *DIDPlc) calcDIDWithKeyIndex(index int) (string, *OperationObject, error
 	}
 
 	b64sig := base64.URLEncoding.WithPadding(base64.NoPadding).EncodeToString(sig)
-	op.Sig = &b64sig
+	signedOp := &OperationObject{
+		Type:                op.Type,
+		RotationKeys:        op.RotationKeys,
+		VerificationMethods: op.VerificationMethods,
+		AlsoKnownAs:         op.AlsoKnownAs,
+		Services:            op.Services,
+		Prev:                op.Prev,
+		Sig:                 &b64sig,
+	}
 
 	buf.Reset()
 
-	node = bindnode.Wrap(op.IPLDNode(), OperationSchema).Representation()
+	node = bindnode.Wrap(signedOp.IPLDNode(), OperationSchema).Representation()
 	if err := dagcbor.Encode(node, buf); err != nil {
 		return "", nil, err
 	}
@@ -295,12 +380,17 @@ func (d *DIDPlc) calcDIDWithKeyIndex(index int) (string, *OperationObject, error
 	b32encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(hash[:])
 	did := strings.ToLower(fmt.Sprintf("did:plc:%s", b32encoded[:24]))
 
-	return did, op, nil
+	return did, signedOp, nil
 }
 
 func (d *DIDPlc) CalcDID() (string, *OperationObject, error) {
+	unsigned, err := d.unsignedOperation()
+	if err != nil {
+		return "", nil, err
+	}
+
 	for i := 0; i < len(d.RotationKeys); i++ {
-		did, signed, err := d.calcDIDWithKeyIndex(i)
+		did, signed, err := d.calcDIDWithKeyIndex(i, unsigned)
 		if err != nil {
 			fmt.Printf("failed to calculate DID; %v\n", err)
 			continue
@@ -325,31 +415,169 @@ func (d *DIDPlc) Create() error {
 		return fmt.Errorf("failed to create did:plc; DID already exists")
 	}
 
-	body, err := json.Marshal(signedOp)
-	if err != nil {
-		return err
-	}
+	buf := new(bytes.Buffer)
+	node := bindnode.Wrap(signedOp.IPLDNode(), OperationSchema).Representation()
 
-	resp, err := http.Post(
-		fmt.Sprintf("%s/%s", PLC_DIRECTORY_BASEURL, d.DID),
-		"application/json",
-		bytes.NewBuffer(body),
-	)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	for i := 0; i < MAX_CREATE_RETRIES; i++ {
+		if err := dagjson.Encode(node, buf); err != nil {
+			return err
+		}
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf(
-			"failed to create DID; status code: %d",
-			resp.StatusCode,
+		resp, err := http.Post(
+			fmt.Sprintf("%s/%s", PLC_DIRECTORY_BASEURL, d.DID),
+			"application/json",
+			buf,
 		)
+		if err != nil {
+			fmt.Printf("failed to create DID; failed to send http req: %v\n", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf(
+				"failed to create DID; server returns invalid status code: %d\n",
+				resp.StatusCode,
+			)
+			continue
+		}
+
+		if err := d.FetchAuditLog(); err != nil {
+			return fmt.Errorf("failed to fetch audit log, but this is expected; %v", err)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to create DID; max retries exceeded")
+}
+
+func (d *DIDPlc) Update() error {
+	if d.DID == "" {
+		return fmt.Errorf("failed to update DID; DID is empty")
 	}
 
 	if err := d.FetchAuditLog(); err != nil {
+		return fmt.Errorf("failed to update DID; %v", err)
+	}
+
+	if op := d.getLatestValidOperationLog(); op == nil {
+		return fmt.Errorf("failed to update DID; there is no valid previous operation")
+	}
+
+	unsigned, err := d.unsignedOperation()
+	if err != nil {
 		return err
 	}
 
-	return nil
+	retries := MAX_UPDATE_RETRIES_PER_KEY * len(d.RotationKeys)
+	for i := 0; i < retries; i++ {
+		// #ToDo: We should verify the audit log before updating the DID
+
+		_, signedOp, err := d.calcDIDWithKeyIndex(i%len(d.RotationKeys), unsigned)
+		if err != nil {
+			fmt.Printf("failed to calculate DID; %v\n", err)
+			continue
+		}
+		if signedOp.Prev == nil {
+			return fmt.Errorf("failed to update DID; there is no valid previous operation")
+		}
+
+		buf := new(bytes.Buffer)
+		node := bindnode.Wrap(signedOp.IPLDNode(), OperationSchema).Representation()
+		if err := dagjson.Encode(node, buf); err != nil {
+			return err
+		}
+
+		resp, err := http.Post(
+			fmt.Sprintf("%s/%s", PLC_DIRECTORY_BASEURL, d.DID),
+			"application/json",
+			buf,
+		)
+		if err != nil {
+			fmt.Printf("failed to update DID; failed to send http req: %v\n", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf(
+				"failed to update DID; server returns invalid status code: %d\n",
+				resp.StatusCode,
+			)
+			continue
+		}
+
+		if err := d.FetchAuditLog(); err != nil {
+			return fmt.Errorf("failed to fetch audit log, but this is expected; %v", err)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to update DID; max retries exceeded")
+}
+
+func (d *DIDPlc) Deactivate() error {
+	if d.DID == "" {
+		return fmt.Errorf("failed to deactivate DID; DID is empty")
+	}
+
+	if err := d.FetchAuditLog(); err != nil {
+		return fmt.Errorf("failed to deactivate DID; %v", err)
+	}
+
+	if op := d.getLatestValidOperationLog(); op == nil {
+		return fmt.Errorf("failed to deactivate DID; there is no valid previous operation")
+	}
+
+	unsigned, err := d.unsignedTombstoneOperation()
+	if err != nil {
+		return err
+	}
+
+	retries := MAX_DEACTIVATE_RETRIES_PER_KEY * len(d.RotationKeys)
+	for i := 0; i < retries; i++ {
+		_, signedOp, err := d.calcDIDWithKeyIndex(i%len(d.RotationKeys), unsigned)
+		if err != nil {
+			fmt.Printf("failed to calculate DID; %v\n", err)
+			continue
+		}
+		if signedOp.Prev == nil {
+			return fmt.Errorf("failed to deactivate DID; there is no valid previous operation")
+		}
+
+		buf := new(bytes.Buffer)
+		node := bindnode.Wrap(signedOp.IPLDNode(), OperationSchema).Representation()
+		if err := dagjson.Encode(node, buf); err != nil {
+			return err
+		}
+
+		resp, err := http.Post(
+			fmt.Sprintf("%s/%s", PLC_DIRECTORY_BASEURL, d.DID),
+			"application/json",
+			buf,
+		)
+		if err != nil {
+			fmt.Printf("failed to deactivate DID; failed to send http req: %v\n", err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			fmt.Printf(
+				"failed to deactivate DID; server returns invalid status code: %d\n",
+				resp.StatusCode,
+			)
+			continue
+		}
+
+		if err := d.FetchAuditLog(); err != nil {
+			return fmt.Errorf("failed to fetch audit log, but this is expected; %v", err)
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to deactivate DID; max retries exceeded")
 }

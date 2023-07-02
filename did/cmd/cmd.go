@@ -205,6 +205,80 @@ func main() {
 
 			fmt.Println("DID:", did)
 			fmt.Printf("Operation: %s\n", encOp)
+
+		case "update":
+			if len(os.Args) != 5 {
+				fmt.Println("Usage: cmd update <did> <prvkey_path>")
+				os.Exit(1)
+			}
+
+			prv, err := loadPrivateKey(os.Args[4])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			didKey, err := key.NewDIDKeyFromPrivateKey(prv.D.Bytes())
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			didPlc := plc.NewDIDPlc(os.Args[3])
+			didPlc.RotationKeys = []*key.DIDKey{didKey}
+			didPlc.VerificationMethods = map[string]*key.DIDKey{
+				"key-1": didKey,
+			}
+			didPlc.AlsoKnownAs = []string{
+				"at://yum.onl",
+			}
+			didPlc.Services = map[string]plc.Service{
+				"atproto_pds": {
+					Type:     "AtprotoPersonalDataServer",
+					Endpoint: "https://pds.yum.onl",
+				},
+			}
+
+			if err := didPlc.Update(); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			fmt.Println("DID:", didPlc.DID)
+			fmt.Printf("Operations: %+v\n", didPlc.Operations)
+
+		case "deactivate":
+			if len(os.Args) != 5 {
+				fmt.Println("Usage: cmd deactivate <did> <prvkey_path>")
+				os.Exit(1)
+			}
+
+			prv, err := loadPrivateKey(os.Args[4])
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			didKey, err := key.NewDIDKeyFromPrivateKey(prv.D.Bytes())
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			didPlc := plc.NewDIDPlc(os.Args[3])
+			didPlc.RotationKeys = []*key.DIDKey{didKey}
+			didPlc.VerificationMethods = map[string]*key.DIDKey{
+				"key-1": didKey,
+			}
+
+			if err := didPlc.Deactivate(); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+
+			fmt.Println("DID:", didPlc.DID)
+			fmt.Printf("Operations: %+v\n", didPlc.Operations)
+
 		default:
 			fmt.Println("Unknown command:", os.Args[2])
 			os.Exit(1)
