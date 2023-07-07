@@ -12,6 +12,10 @@ import (
 	"strings"
 	"time"
 
+	cid "github.com/ipfs/go-cid"
+	mc "github.com/multiformats/go-multicodec"
+	mh "github.com/multiformats/go-multihash"
+
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/codec/dagcbor"
 	"github.com/ipld/go-ipld-prime/codec/dagjson"
@@ -376,8 +380,19 @@ func (d *DIDPlc) calcDIDWithKeyIndex(index int, op *OperationObject) (string, *O
 		return "", nil, err
 	}
 
-	hash := sha256.Sum256(buf.Bytes())
-	b32encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(hash[:])
+	pref := cid.Prefix{
+		Version:  1,
+		Codec:    uint64(mc.Raw),
+		MhType:   mh.SHA2_256,
+		MhLength: -1,
+	}
+
+	cid, err := pref.Sum(buf.Bytes())
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to calculate CID; %w", err)
+	}
+
+	b32encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(cid.Bytes())
 	did := strings.ToLower(fmt.Sprintf("did:plc:%s", b32encoded[:24]))
 
 	return did, signedOp, nil
