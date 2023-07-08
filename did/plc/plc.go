@@ -596,3 +596,7 @@ func (d *DIDPlc) Deactivate() error {
 
 	return fmt.Errorf("failed to deactivate DID; max retries exceeded")
 }
+
+func (d *DIDPlc) String() string {
+	return d.DID
+}
